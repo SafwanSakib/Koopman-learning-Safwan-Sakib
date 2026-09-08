@@ -14,7 +14,8 @@ dependencies:
   - pandas=2.2.2
   - pip=24.0
   - pip:
-      - torch==2.3.0
+      - --extra-index-url https://download.pytorch.org/whl/cu121
+      - torch==2.3.0+cu121
       - cvxpy==1.5.1
       - osqp==0.6.7.post0
       - casadi==3.6.5
