@@ -47,6 +47,17 @@ def load_trajectory_data(benchmark: str, data_cfg: dict, seed: int) -> tuple[np.
             seed=seed,
             excitation=data_cfg["excitation"],
         )
+    elif benchmark == "cartpole":
+        from sims.cartpole import generate_pe_trajectory
+        T_samples = data_cfg["T"]
+        dt = data_cfg["dt"]
+        traj = generate_pe_trajectory(
+            x0=np.array([0.0, 0.0, np.pi - 0.1, 0.0]),  # near the stable hanging-down equilibrium
+            t_span=(0.0, T_samples * dt),
+            dt=dt,
+            seed=seed,
+            excitation=data_cfg["excitation"],
+        )
     else:
         raise NotImplementedError(f"load_trajectory_data: benchmark '{benchmark}' not wired in yet")
 

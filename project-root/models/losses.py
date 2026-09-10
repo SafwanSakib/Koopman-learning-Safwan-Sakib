@@ -79,10 +79,29 @@ def physics_loss_van_der_pol(x: torch.Tensor, u: torch.Tensor, z_next_pred: torc
     return torch.mean(torch.sum((z_nominal_next - z_next_pred) ** 2, dim=-1))
 
 
-def physics_loss_cartpole(*args, **kwargs) -> torch.Tensor:
-    """Kinematic-consistency term for cart-pole (soft loss fallback if the
-    hard-coded structural prior is not fully wired into the decoder)."""
-    raise NotImplementedError("Week 2-4")
+def physics_loss_cartpole(x: torch.Tensor, u: torch.Tensor, z_next_pred: torch.Tensor,
+                           model, dt: float = 0.02, m_c: float = 1.0, m_p: float = 0.1,
+                           l: float = 0.5, g: float = 9.81) -> torch.Tensor:
+    """Kinematic-consistency term for cart-pole. Mirrors sims/cartpole.py's
+    dynamics() exactly, but rewritten with torch ops (batched, autograd-
+    compatible) instead of numpy (single-instance, not differentiable) --
+    see models/losses.py module docstring's note on why these need to be
+    separate implementations of the same equations."""
+    p, p_dot, theta, theta_dot = x[:, 0], x[:, 1], x[:, 2], x[:, 3]
+    u_flat = u[:, 0]
+    sin_t, cos_t = torch.sin(theta), torch.cos(theta)
+    total_mass = m_c + m_p
+
+    theta_ddot = (
+        g * sin_t - cos_t * (u_flat + m_p * l * theta_dot ** 2 * sin_t) / total_mass
+    ) / (l * (4.0 / 3.0 - m_p * cos_t ** 2 / total_mass))
+    p_ddot = (u_flat + m_p * l * (theta_dot ** 2 * sin_t - theta_ddot * cos_t)) / total_mass
+
+    x_dot = torch.stack([p_dot, p_ddot, theta_dot, theta_ddot], dim=-1)
+    x_nominal_next = x + dt * x_dot
+
+    z_nominal_next = model.encode(x_nominal_next)
+    return torch.mean(torch.sum((z_nominal_next - z_next_pred) ** 2, dim=-1))
 
 
 def physics_loss_cstr(*args, **kwargs) -> torch.Tensor:
