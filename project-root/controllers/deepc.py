@@ -110,24 +110,48 @@ def build_hankel_matrix(data: np.ndarray, depth: int) -> np.ndarray:
 
     Parameters
     ----------
-    data : np.ndarray, shape (T, d)
+    data : np.ndarray, shape (T, d) or (T,)
         A length-T trajectory of d-dimensional samples (e.g. inputs u^d or
-        lifted states z^d).
+        lifted states z^d). A 1-D array is treated as d=1.
     depth : int
         Window depth L (Theoretical_Background_Full.md Sec.2.2).
 
     Returns
     -------
-    np.ndarray, shape (L*d, T-L+1)
+    np.ndarray, shape (L*d, T-L+1). Column i is the flattened length-L
+    window data[i:i+L] (row-major: block for time i, then i+1, ..., i+L-1).
     """
-    raise NotImplementedError("Week 1-2: implement Hankel matrix construction")
+    data = np.asarray(data, dtype=float)
+    if data.ndim == 1:
+        data = data.reshape(-1, 1)
+    T, d = data.shape
+    L = depth
+    if T < L:
+        raise ValueError(f"trajectory length T={T} is shorter than depth L={L}")
+    num_cols = T - L + 1
+    H = np.empty((L * d, num_cols))
+    for i in range(num_cols):
+        H[:, i] = data[i:i + L].reshape(-1)
+    return H
+
+
+def split_hankel(hankel: np.ndarray, block_dim: int, T_ini: int, N_h: int) -> tuple[np.ndarray, np.ndarray]:
+    """Split a depth-(T_ini+N_h) block Hankel matrix into its past
+    (first T_ini blocks of rows) and future (remaining N_h blocks) parts,
+    e.g. splitting H_L(u^d) into U_p, U_f (Theoretical_Background_Full.md
+    Sec.3.1). `block_dim` is the per-timestep dimension d used when the
+    Hankel matrix was built (build_hankel_matrix's `data.shape[1]`).
+    """
+    past_rows = T_ini * block_dim
+    return hankel[:past_rows, :], hankel[past_rows:, :]
 
 
 def check_persistency_of_excitation(hankel: np.ndarray, tol: float = 1e-8) -> bool:
     """Full-row-rank check (Theoretical_Background_Full.md Sec.2.3). Used both
     as a data-generation sanity check and as Theorem 1's fallback empirical
     verification procedure (Research Plan Sec.5.4)."""
-    raise NotImplementedError("Week 1-2")
+    rank = np.linalg.matrix_rank(hankel, tol=tol)
+    return bool(rank == hankel.shape[0])
 
 
 def check_normalized_excitation(hankel_star: np.ndarray, num_columns: int) -> dict:
@@ -146,10 +170,14 @@ def check_normalized_excitation(hankel_star: np.ndarray, num_columns: int) -> di
     -------
     dict with keys: "sigma_min", "l", "sigma_min_over_sqrt_l".
     """
-    raise NotImplementedError(
-        "Week 1-2, alongside check_persistency_of_excitation: compute "
-        "np.linalg.svd(hankel_star)[1].min() and the normalized ratio."
-    )
+    singular_values = np.linalg.svd(hankel_star, compute_uv=False)
+    sigma_min = float(singular_values.min())
+    l = num_columns
+    return {
+        "sigma_min": sigma_min,
+        "l": l,
+        "sigma_min_over_sqrt_l": sigma_min / np.sqrt(l),
+    }
 
 
 def check_controllability(A: np.ndarray, B: np.ndarray, tol: float = 1e-8) -> dict:
@@ -245,22 +273,125 @@ class DeePCProblem:
     def build(self) -> None:
         """Build the CVXPY problem.
 
-        MUST implement Prescription P1 here: compute l = T - L + 1 from the
-        actual data length and depth, then set the QP's regularization
-        weights to config.lambda_g0 * l and config.lambda_sigma0 * l (or
-        equivalently use the averaged-objective form -- see module
-        docstring) -- do NOT use config.lambda_g0/lambda_sigma0 directly as
-        the QP weights.
+        Implements Prescription P1: l = T - L + 1 is computed from the
+        actual data supplied, and the QP's regularization weights are set
+        to config.lambda_g0 * l and config.lambda_sigma0 * l (NOT
+        config.lambda_g0/lambda_sigma0 directly).
 
-        If config.decouple_g_data is True, this must also split u_data/
-        y_data into two halves and build separate Hankel matrices for the
-        "compute g" role vs. the "evaluate prediction error" role (see
-        DeePCConfig.decouple_g_data docstring).
+        If config.decouple_g_data is True, the offline trajectory is split
+        in half: g is solved for using only the FIRST half's Hankel
+        columns; the second half is stashed on self.eval_u_data /
+        self.eval_y_data for external (caller-side) held-out evaluation
+        (see experiments/theorem3_margin_validation.py) -- this class does
+        not itself evaluate held-out prediction error, it only performs the
+        data split.
+
+        If config.use_cbf is True and a cbf_constraint_builder was supplied
+        (controllers/cbf_constraint.py), its returned constraints are added
+        to the QP verbatim -- the safety layer is a strict superset of the
+        plain QP built here, never a separate code path (Research Plan
+        Sec.7.3 item 8, "ablation: full method without CBF layer" is simply
+        use_cbf=False on this same class).
         """
-        raise NotImplementedError("Week 1-2 (plain), Week 4-6 (+ CBF constraint)")
+        import cvxpy as cp
+
+        cfg = self.config
+        u_data = np.asarray(self.u_data, dtype=float)
+        y_data = np.asarray(self.y_data, dtype=float)
+        if u_data.ndim == 1:
+            u_data = u_data.reshape(-1, 1)
+        if y_data.ndim == 1:
+            y_data = y_data.reshape(-1, 1)
+
+        if cfg.decouple_g_data:
+            T_total = u_data.shape[0]
+            half = T_total // 2
+            g_u_data, g_y_data = u_data[:half], y_data[:half]
+            self.eval_u_data, self.eval_y_data = u_data[half:], y_data[half:]
+        else:
+            g_u_data, g_y_data = u_data, y_data
+
+        m = g_u_data.shape[1]
+        p = g_y_data.shape[1]
+        L = cfg.T_ini + cfg.N_h
+
+        Hu = build_hankel_matrix(g_u_data, L)
+        Hy = build_hankel_matrix(g_y_data, L)
+        l = Hu.shape[1]  # number of Hankel columns, per Prescription P1
+
+        Up, Uf = split_hankel(Hu, m, cfg.T_ini, cfg.N_h)
+        Yp, Yf = split_hankel(Hy, p, cfg.T_ini, cfg.N_h)
+
+        self.m, self.p, self.l = m, p, l
+        self.Up, self.Uf, self.Yp, self.Yf = Up, Uf, Yp, Yf
+
+        g = cp.Variable(l)
+        sigma_y = cp.Variable(cfg.T_ini * p)
+
+        u_ini_param = cp.Parameter(cfg.T_ini * m)
+        y_ini_param = cp.Parameter(cfg.T_ini * p)
+        y_ref_param = cp.Parameter(cfg.N_h * p, value=np.zeros(cfg.N_h * p))
+
+        y_f = Yf @ g
+        u_f = Uf @ g
+
+        # Prescription P1 (REQUIRED, see module docstring): weights scale
+        # with l, the number of Hankel columns actually used to solve for g.
+        lambda_g = cfg.lambda_g0 * l
+        lambda_sigma = cfg.lambda_sigma0 * l
+
+        tracking_cost = cp.sum_squares(y_f - y_ref_param)
+        input_cost = cp.sum_squares(u_f)
+        reg_cost = lambda_g * cp.sum_squares(g) + lambda_sigma * cp.sum_squares(sigma_y)
+        objective = cp.Minimize(tracking_cost + input_cost + reg_cost)
+
+        constraints = [Up @ g == u_ini_param, Yp @ g == y_ini_param + sigma_y]
+        if cfg.use_cbf and self.cbf_constraint_builder is not None:
+            constraints += self.cbf_constraint_builder(g)
+
+        self._problem = cp.Problem(objective, constraints)
+        self._g = g
+        self._sigma_y = sigma_y
+        self._u_ini_param = u_ini_param
+        self._y_ini_param = y_ini_param
+        self._y_ref_param = y_ref_param
+
+    def set_reference(self, y_ref: np.ndarray) -> None:
+        """Update the tracked output reference (defaults to zero, i.e.
+        regulation to the origin, if never called). y_ref must have shape
+        (N_h, p) or be flattenable to length N_h * p."""
+        if self._problem is None:
+            self.build()
+        self._y_ref_param.value = np.asarray(y_ref, dtype=float).reshape(-1)
 
     def solve(self, u_ini: np.ndarray, y_ini: np.ndarray) -> dict:
         """Solve the QP given the most recent u_ini/y_ini window; return the
         optimal first input plus diagnostics (solve time, feasibility,
-        predicted h(x) trajectory if CBF is active)."""
-        raise NotImplementedError("Week 1-2 (plain), Week 4-6 (+ CBF constraint)")
+        predicted h(x) trajectory if CBF is active). Delegates the actual
+        solver call (with fallback) to controllers.qp_solver.solve_qp, so
+        solver choice/fallback logic lives in one place (see that module's
+        docstring)."""
+        from controllers.qp_solver import solve_qp
+
+        if self._problem is None:
+            self.build()
+
+        self._u_ini_param.value = np.asarray(u_ini, dtype=float).reshape(-1)
+        self._y_ini_param.value = np.asarray(y_ini, dtype=float).reshape(-1)
+
+        solve_info = solve_qp(self._problem)
+
+        g_val = self._g.value
+        if g_val is None:
+            return {**solve_info, "u_first": None}
+
+        u_f_val = self.Uf @ g_val
+        y_f_val = self.Yf @ g_val
+        return {
+            **solve_info,
+            "u_first": u_f_val[: self.m],
+            "u_f": u_f_val,
+            "y_f": y_f_val,
+            "g": g_val,
+            "sigma_y": self._sigma_y.value,
+        }

@@ -28,6 +28,7 @@ MODULES = [
     "sims.quadrotor",
     "sims.lorenz",
     "sims.exact_koopman_toy",
+    "sims.mass_spring_damper",
     "baselines.mpc_known_model",
     "baselines.koopman_mpc_indirect",
     "baselines.koopman_cbf_indirect",
@@ -203,6 +204,38 @@ def test_held_out_residual_bound_correctness() -> None:
     assert result["epsilon_hat"] == 0.05
     assert result["bound"] == pytest.approx(0.05 + 0.5 * 0.1)
     assert result["bound"] >= result["epsilon_hat"]  # bound must never be tighter than the max residual itself
+
+
+def test_qp_solver_solves_simple_problem_with_fallback() -> None:
+    """controllers.qp_solver.solve_qp is real (not a stub) -- give it real
+    coverage, including that it correctly reports which solver was used."""
+    import cvxpy as cp
+
+    from controllers.qp_solver import solve_qp
+
+    x = cp.Variable(2)
+    objective = cp.Minimize(cp.sum_squares(x - np.array([1.0, 2.0])))
+    problem = cp.Problem(objective)
+
+    result = solve_qp(problem, solver="OSQP")
+    assert result["status"] in ("optimal", "optimal_inaccurate")
+    assert result["solver_used"] is not None
+    assert result["solve_time_seconds"] >= 0
+    assert np.allclose(x.value, [1.0, 2.0], atol=1e-3)
+
+
+def test_mass_spring_damper_discretization_is_stable() -> None:
+    """sims.mass_spring_damper's zero-order-hold discretization is real
+    math -- give it coverage. A damped mass-spring-damper (c>0) should have
+    a Schur-stable discrete A matrix (all eigenvalues inside the unit
+    circle) for a reasonable sample time."""
+    from sims.mass_spring_damper import discrete_matrices
+
+    A, B = discrete_matrices(dt=0.1, m=1.0, c=0.4, k=2.0)
+    eigvals = np.linalg.eigvals(A)
+    assert np.all(np.abs(eigvals) < 1.0)
+    assert A.shape == (2, 2)
+    assert B.shape == (2, 1)
 
 
 def test_cbf_forward_invariance_checker() -> None:
