@@ -47,26 +47,36 @@ import torch
 
 def reconstruction_loss(x: torch.Tensor, x_hat: torch.Tensor) -> torch.Tensor:
     """||x - decoder(encoder(x))||^2"""
-    raise NotImplementedError("Week 2-4")
+    return torch.mean(torch.sum((x - x_hat) ** 2, dim=-1))
 
 
 def linear_dynamics_consistency_loss(
     z_next: torch.Tensor, z_next_pred: torch.Tensor
 ) -> torch.Tensor:
     """||phi(x_{k+1}) - (A phi(x_k) + B u_k)||^2"""
-    raise NotImplementedError("Week 2-4")
+    return torch.mean(torch.sum((z_next - z_next_pred) ** 2, dim=-1))
 
 
 def prediction_loss(x_next: torch.Tensor, x_next_hat: torch.Tensor) -> torch.Tensor:
     """||x_{k+1} - decoder(A phi(x_k) + B u_k)||^2"""
-    raise NotImplementedError("Week 2-4")
+    return torch.mean(torch.sum((x_next - x_next_hat) ** 2, dim=-1))
 
-
-def physics_loss_van_der_pol(*args, **kwargs) -> torch.Tensor:
-    """Soft nominal-model-agreement term for Van der Pol. This is the primary
+def physics_loss_van_der_pol(x: torch.Tensor, u: torch.Tensor, z_next_pred: torch.Tensor,
+                              model, dt: float = 0.05, mu: float = 1.0) -> torch.Tensor:
+    """Soft nominal-model-agreement term for Van der Pol. Steps the KNOWN
+    Van der Pol ODE forward one Euler step from the current (x, u), lifts
+    that nominal prediction through the encoder, and penalizes the learned
+    dynamics (z_next_pred) for disagreeing with it. This is the primary
     ablation lever: set lambda_physics=0 to reproduce Baseline #5/#9
     (nonlinear DeePC without physics-informed regularization)."""
-    raise NotImplementedError("Week 2-4")
+    x1, x2 = x[:, 0], x[:, 1]
+    u_flat = u[:, 0]
+    x1_dot = x2
+    x2_dot = mu * (1 - x1 ** 2) * x2 - x1 + u_flat
+    x_nominal_next = x + dt * torch.stack([x1_dot, x2_dot], dim=-1)
+
+    z_nominal_next = model.encode(x_nominal_next)
+    return torch.mean(torch.sum((z_nominal_next - z_next_pred) ** 2, dim=-1))
 
 
 def physics_loss_cartpole(*args, **kwargs) -> torch.Tensor:
@@ -106,7 +116,27 @@ def total_koopman_loss(
     """Composes all four terms; returns a dict with each component plus
     'total', so training logs can report the breakdown (needed for the
     physics-informed vs. no-physics ablation comparison, Track B Sec.2.1)."""
-    raise NotImplementedError("Week 2-4")
+    out = model.forward(x, u)
+    z_next = model.encode(x_next)
+
+    recon = reconstruction_loss(x, out["x_hat"])
+    dyn = linear_dynamics_consistency_loss(z_next, out["z_next_pred"])
+    pred = prediction_loss(x_next, out["x_next_hat"])
+
+    if lambda_physics > 0:
+        physics_fn = physics_loss_registry[benchmark]
+        physics = physics_fn(x, u, out["z_next_pred"], model)
+    else:
+        physics = torch.tensor(0.0)
+
+    total = recon + dyn + pred + lambda_physics * physics
+    return {
+        "reconstruction": recon,
+        "linear_dynamics": dyn,
+        "prediction": pred,
+        "physics": physics,
+        "total": total,
+    }
 
 
 def fill_distance(points: np.ndarray, candidate_points: np.ndarray | None = None) -> float:

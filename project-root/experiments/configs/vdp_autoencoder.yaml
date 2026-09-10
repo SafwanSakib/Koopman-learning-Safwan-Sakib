@@ -17,7 +17,7 @@ data:
 model:
   state_dim: 2
   input_dim: 1
-  lift_dim: 8
+  lift_dim: 4
   hidden_dims: [64, 64]
   h_coordinate: 0       # placeholder -- see sims/van_der_pol.py::safe_set TODO
   bilinear: false
@@ -27,7 +27,7 @@ training:
   lambda_recon: 1.0
   lambda_dynamics: 1.0
   lambda_pred: 1.0
-  lr: 1e-3
+  lr: 1.0e-3
   epochs: 200
   batch_size: 64
   early_stopping_patience: 20

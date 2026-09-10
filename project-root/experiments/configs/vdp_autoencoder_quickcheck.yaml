@@ -1,0 +1,24 @@
+benchmark: van_der_pol
+seed: 0
+
+data:
+  T: 500
+  dt: 0.05
+  mu: 1.0
+  excitation: prbs
+  noise_sigma: 0.0
+  train_val_split: 0.8
+
+model:
+  state_dim: 2
+  input_dim: 1
+  lift_dim: 8
+  hidden_dims: [32, 32]
+  bilinear: false
+
+training:
+  lambda_physics: 1.0
+  lr: 1.0e-3
+  epochs: 50
+  batch_size: 32
+  early_stopping_patience: 15

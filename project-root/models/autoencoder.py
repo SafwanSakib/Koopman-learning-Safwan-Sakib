@@ -95,6 +95,16 @@ class KoopmanAutoencoder(nn.Module):
         bilinear realization, cf. Xiong et al. 2025 / Zinage & Bakolas 2023;
         sims/exact_koopman_toy.py is a worked exact example of this form).
     """
+    def _build_mlp(self, in_dim: int, out_dim: int, hidden_dims: tuple[int, ...]) -> nn.Module:
+        """Small helper: builds Linear -> activation -> ... -> Linear."""
+        layers = []
+        prev_dim = in_dim
+        for h in hidden_dims:
+            layers.append(nn.Linear(prev_dim, h))
+            layers.append(nn.Tanh())  # smooth activation, common choice for dynamical-systems autoencoders
+            prev_dim = h
+        layers.append(nn.Linear(prev_dim, out_dim))  # final layer: no activation (raw output)
+        return nn.Sequential(*layers)
 
     def __init__(
         self,
@@ -113,26 +123,44 @@ class KoopmanAutoencoder(nn.Module):
         self.bilinear = bilinear
 
         # TODO: build encoder/decoder MLPs from hidden_dims.
-        self.encoder: nn.Module | None = None
-        self.decoder: nn.Module | None = None
+        self.encoder = self._build_mlp(state_dim, lift_dim, hidden_dims)
+        self.decoder = self._build_mlp(lift_dim, state_dim, hidden_dims)
 
         # Learned lifted-dynamics matrices.
-        self.A = nn.Parameter(torch.eye(lift_dim))
+        self.A = nn.Parameter(torch.eye(lift_dim) + 0.01 * torch.randn(lift_dim, lift_dim))
         self.B = nn.Parameter(torch.zeros(lift_dim, input_dim))
         if bilinear:
             # One N x N cross-term matrix per input channel: z' += (u_i * C_i) z
             self.C = nn.Parameter(torch.zeros(input_dim, lift_dim, lift_dim))
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("Week 2-4: implement encoder forward pass")
+        return self.encoder(x)
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError("Week 2-4: implement decoder forward pass")
+        return self.decoder(z)
 
     def lifted_step(self, z: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """One-step lifted dynamics prediction z_{k+1} ~= A z_k + B u_k
         (+ bilinear cross term if enabled)."""
-        raise NotImplementedError("Week 2-4: implement lifted dynamics step")
+        z_next = z @ self.A.T + u @ self.B.T
+        if self.bilinear:
+            # u: (batch, input_dim), z: (batch, lift_dim), C: (input_dim, lift_dim, lift_dim)
+            # cross term: sum over input channels i of u_i * (C_i @ z)
+            cross = torch.einsum("bi,ijk,bk->bj", u, self.C, z)
+            z_next = z_next + cross
+        return z_next
+
+    def forward(self, x: torch.Tensor, u: torch.Tensor) -> dict[str, torch.Tensor]:
+        z = self.encode(x)
+        x_hat = self.decode(z)
+        z_next_pred = self.lifted_step(z, u)
+        x_next_hat = self.decode(z_next_pred)
+        return {
+            "z": z,
+            "x_hat": x_hat,
+            "z_next_pred": z_next_pred,
+            "x_next_hat": x_next_hat,
+        }
 
     def h_hat(self, z: torch.Tensor) -> torch.Tensor:
         """Extract ALL embedded barrier-function estimates from a lifted
@@ -148,5 +176,3 @@ class KoopmanAutoencoder(nn.Module):
             )
         return z[..., self.h_coordinates]
 
-    def forward(self, x: torch.Tensor, u: torch.Tensor) -> dict[str, torch.Tensor]:
-        raise NotImplementedError("Week 2-4: implement full forward pass")
