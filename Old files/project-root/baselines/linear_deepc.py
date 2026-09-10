@@ -5,7 +5,7 @@ code, applied around a linearization point of each nonlinear benchmark --
 isolates the effect of nonlinearity handling."
 
 TODO (Week 6-10):
-    - Reuse controllers/deepc.py's plain (non-Koopman) DeePCProblem directly.
+    - Reuse control/deepc.py's plain (non-Koopman) DeePCProblem directly.
     - For each benchmark, linearize sims/*.py's dynamics() at a chosen
       operating point (e.g. via finite-difference Jacobian) and generate a
       raw (u, x) trajectory near that point for the Hankel matrices -- do

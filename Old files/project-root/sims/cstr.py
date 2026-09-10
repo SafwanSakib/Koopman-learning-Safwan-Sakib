@@ -72,19 +72,9 @@ def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: floa
     raise NotImplementedError("Week 1-2: implement PE input generation")
 
 
-def safe_set(x: np.ndarray, T_max: float = 400.0, C_A_min: float = 0.1) -> dict:
-    """RESOLVED 2026-09-10 -- same resolution as sims/cartpole.py's
-    safe_set: the temperature ceiling and concentration floor are returned
-    as TWO SEPARATE barrier functions (each a single linear coordinate of
-    the lifted state once embedded), not min()-combined. See
-    sims/cartpole.py's safe_set docstring for the full rationale
-    (notation_assumptions.tex, h(x) = e_j^T Phi(x) single-coordinate
-    requirement).
-
-    Returns
-    -------
-    dict with keys "temperature" and "concentration", each h(x) >= 0
-    inside the safe region.
+def safe_set(x: np.ndarray, T_max: float = 400.0, C_A_min: float = 0.1) -> np.ndarray:
+    """h(x) combining a temperature ceiling and a concentration floor.
+    See sims/cartpole.py's safe_set docstring re: min()-combination vs.
+    separate CBFs — same open decision applies here.
     """
-    C_A, T = x
-    return {"temperature": T_max - T, "concentration": C_A - C_A_min}
+    raise NotImplementedError("Week 2: finalize h(x) formulation, see docstring")

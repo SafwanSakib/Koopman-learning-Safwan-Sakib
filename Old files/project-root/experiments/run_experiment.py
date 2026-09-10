@@ -26,7 +26,7 @@ experiments/stats.py can aggregate uniformly):
 TODO (Week 9-14):
     - Config loading from experiments/configs/*.yaml
     - Dispatch to the right baselines.*.run() or the main pipeline
-      (controllers/deepc.py + models/autoencoder.py + controllers/cbf_constraint.py)
+      (control/deepc.py + models/autoencoder.py + control/cbf_constraint.py)
       based on `method` in the config
     - Seed everything (numpy, torch, python random) from `seed`
     - Held-out test trajectory: generate separately, never touch during

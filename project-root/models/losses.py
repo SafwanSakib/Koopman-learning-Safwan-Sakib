@@ -1,21 +1,37 @@
 """Loss terms for physics-informed Koopman autoencoder training.
 
-Track B Implementation Plan §2.1; Theoretical_Background_Full.md §4.3 (three
-canonical terms) and §8.2 (physics-informed extension).
+Track B Implementation Plan Sec.2.1; Theoretical_Background_Full.md Sec.4.3
+(three canonical terms) and Sec.8.2 (physics-informed extension).
 
     L = reconstruction_loss(x, decoder(encoder(x)))
       + linear_dynamics_loss(encoder(x_next), A @ encoder(x) + B @ u)
       + prediction_loss(x_next, decoder(A @ encoder(x) + B @ u))
       + lambda_physics * physics_loss(...)   # nominal-model or conservation-law term
 
-physics_loss is benchmark-specific (Research Plan §5.2, Track B §2.1):
+physics_loss is benchmark-specific (Research Plan Sec.5.2, Track B Sec.2.1):
     - cart-pole: hard-code known kinematics (position integrates velocity
       exactly) into the decoder architecture where possible, per
-      Theoretical_Background_Full.md §8.2's "structural prior" guidance,
+      Theoretical_Background_Full.md Sec.8.2's "structural prior" guidance,
       rather than purely as a soft loss term.
     - CSTR: energy/mass-balance-consistency term.
     - Van der Pol: nominal-model-agreement term (soft), useful as the primary
-      ablation target (lambda_physics=0 baseline, Track B §4.2 row 5/9).
+      ablation target (lambda_physics=0 baseline, Track B Sec.4.2 row 5/9).
+
+--- ADDED 2026-09-10 per the frozen Track A theory note
+(theorem3_margin_bound.tex, "Route 1: empirically validated residual",
+Lemma "Validated residual bound", and Assumption A8 "Residual regularity"):
+epsilon_phys is NOT just a training-loss number -- Theorem 3's C_3 term
+needs a rigorously bounded epsilon_bar, obtained by MEASURING the residual
+on a held-out validation set and correcting for how densely that set
+covers the operating region (its "fill distance"). See
+`held_out_residual_bound` and `fill_distance` below -- these are fully
+implemented (not stubs), since they're pure geometry/statistics and don't
+depend on the autoencoder itself being trained yet. models/train.py must
+call these AFTER every training run and log the resulting bound alongside
+the usual loss curves; this is the actual epsilon_bar that feeds Theorem
+3's margin (and, at the Track B level, Baseline #6's He et al.-style
+margin comparison, and the Robust-Koopman-CBF-SAC-style empirical-margin
+idea already in Theoretical_Background_Full.md Sec.7.3).
 
 TODO (Week 2-4):
     - Implement each loss function below
@@ -25,6 +41,7 @@ TODO (Week 2-4):
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 
 
@@ -74,7 +91,7 @@ physics_loss_registry = {
     "cstr": physics_loss_cstr,
     "quadrotor": physics_loss_quadrotor,
     # lorenz intentionally excluded: prediction-accuracy stress test only,
-    # no safety constraint / no physics-informed term planned (Research Plan §7.1).
+    # no safety constraint / no physics-informed term planned (Research Plan Sec.7.1).
 }
 
 
@@ -88,5 +105,89 @@ def total_koopman_loss(
 ) -> dict[str, torch.Tensor]:
     """Composes all four terms; returns a dict with each component plus
     'total', so training logs can report the breakdown (needed for the
-    physics-informed vs. no-physics ablation comparison, Track B §2.1)."""
+    physics-informed vs. no-physics ablation comparison, Track B Sec.2.1)."""
     raise NotImplementedError("Week 2-4")
+
+
+def fill_distance(points: np.ndarray, candidate_points: np.ndarray | None = None) -> float:
+    """Estimate the fill distance h_v of `points` over the region of
+    interest (Assumption A8 / Lemma "Validated residual bound").
+
+    Fill distance = max over the region of (distance to the NEAREST point
+    in `points`). Two modes:
+
+    - `candidate_points` given (recommended): a dense grid or independently
+      sampled set covering X x U; returns the true fill-distance estimate
+      max_c min_p ||c - p||.
+    - `candidate_points=None`: cheap proxy using leave-one-out nearest-
+      neighbor distance WITHIN `points` itself (the largest gap between a
+      validation point and its nearest neighbor) -- biased low relative to
+      the true fill distance (it only sees gaps the validation set itself
+      reveals) but requires no extra sampling; fine for an early sanity
+      check, should be replaced with the candidate_points mode before
+      trusting the resulting Theorem 3 bound for the paper.
+
+    This is real, implemented geometry (not a stub) -- it does not depend
+    on the autoencoder being trained, only on having residual-evaluation
+    points in hand.
+    """
+    from scipy.spatial import cKDTree
+
+    points = np.atleast_2d(points)
+    if candidate_points is None:
+        if points.shape[0] < 2:
+            return float("inf")
+        tree = cKDTree(points)
+        # query 2 nearest (including self), take the 2nd
+        dists, _ = tree.query(points, k=2)
+        return float(np.max(dists[:, 1]))
+    else:
+        candidate_points = np.atleast_2d(candidate_points)
+        tree = cKDTree(points)
+        dists, _ = tree.query(candidate_points, k=1)
+        return float(np.max(dists))
+
+
+def held_out_residual_bound(residual_norms: np.ndarray, L_epsilon: float,
+                             fill_dist: float) -> dict:
+    """Lemma "Validated residual bound" (theorem3_margin_bound.tex, Route 1):
+    given the MEASURED residual norms ||epsilon_phys(x_j, u_j)|| on a
+    held-out validation set forming an h_v-net of X x U (h_v = fill_dist,
+    see `fill_distance` above), and the Lipschitz constant L_epsilon of
+    epsilon_phys (Assumption A8), returns
+
+        epsilon_bar <= epsilon_hat + L_epsilon * h_v,   epsilon_hat = max_j residual_norms[j]
+
+    This is the actual quantity Theorem 3's C_3 term uses -- call this
+    after every training run on the held-out validation split (not the
+    training split) and log the result alongside the training loss curves.
+    Fully implemented (not a stub): pure arithmetic once residuals and a
+    fill-distance estimate are in hand.
+
+    Parameters
+    ----------
+    residual_norms : np.ndarray, shape (M,)
+        ||epsilon_phys(x_j, u_j)|| for each of the M held-out validation
+        points, i.e. ||z_true_next - (A z + B u)|| evaluated with the
+        TRAINED model on data it did not see during training.
+    L_epsilon : float
+        Lipschitz constant of epsilon_phys (Assumption A8) -- typically
+        estimated empirically (e.g. via finite-difference sampling of the
+        trained residual field) rather than known a priori; document
+        however it was obtained when this is called in practice.
+    fill_dist : float
+        h_v, from `fill_distance` above.
+
+    Returns
+    -------
+    dict with keys: "epsilon_hat", "fill_distance", "L_epsilon", "bound".
+    """
+    residual_norms = np.asarray(residual_norms)
+    epsilon_hat = float(np.max(residual_norms))
+    bound = epsilon_hat + L_epsilon * fill_dist
+    return {
+        "epsilon_hat": epsilon_hat,
+        "fill_distance": fill_dist,
+        "L_epsilon": L_epsilon,
+        "bound": bound,
+    }

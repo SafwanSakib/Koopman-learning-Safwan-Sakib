@@ -52,34 +52,13 @@ def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: floa
     raise NotImplementedError("Week 1-2: implement PE input generation")
 
 
-def safe_set(x: np.ndarray, obstacles: list[tuple[float, float, float]]) -> dict:
-    """RESOLVED 2026-09-10 -- same resolution as sims/cartpole.py's
-    safe_set, doubly important here since obstacle count varies per scene:
-    return ONE SEPARATE barrier function PER obstacle (distance to that
-    obstacle's center - its radius - vehicle radius), never min()-combined
-    across obstacles. See sims/cartpole.py's safe_set docstring for the
-    full rationale (notation_assumptions.tex, h(x) = e_j^T Phi(x)
-    single-coordinate requirement).
+def safe_set(x: np.ndarray, obstacles: list[tuple[float, float, float]]) -> np.ndarray:
+    """Collision-avoidance h(x): min over obstacles of (distance to obstacle
+    center - obstacle radius - vehicle radius). `obstacles` is a list of
+    (cx, cz, radius) tuples.
 
-    Consequence for models/autoencoder.py: h_coordinates must have one
-    entry per obstacle in the SPECIFIC SCENE being trained/evaluated on --
-    the lift_dim and h_coordinates list are therefore scene-dependent for
-    this benchmark, unlike cart-pole/CSTR where the bound count is fixed.
-    Document the obstacle count used per experiment config
-    (experiments/configs/) so results are reproducible.
-
-    Parameters
-    ----------
-    obstacles : list of (cx, cz, radius) tuples.
-
-    Returns
-    -------
-    dict with keys "obstacle_0", "obstacle_1", ..., each h(x) >= 0 inside
-    the safe region for that obstacle.
+    TODO (Week 6-10, quadrotor onboarding): same min()-smoothness caveat as
+    cartpole/cstr applies, doubly so here since there may be multiple
+    obstacles simultaneously active.
     """
-    px, pz = x[0], x[1]
-    vehicle_radius = 0.15  # placeholder, TODO: source from a shared config
-    return {
-        f"obstacle_{i}": float(np.hypot(px - cx, pz - cz) - r - vehicle_radius)
-        for i, (cx, cz, r) in enumerate(obstacles)
-    }
+    raise NotImplementedError("Week 6-10: finalize h(x) formulation, see docstring")

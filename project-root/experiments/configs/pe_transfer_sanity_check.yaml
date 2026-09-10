@@ -1,0 +1,29 @@
+# Theorem 1 sanity-check experiment config -- added 2026-09-05 per Track C's
+# literature lock (see experiments/pe_transfer_sanity_check.py docstring for
+# full rationale). Exact-embedding limit (Shang et al. 2024) -> perturbed
+# embedding sweep.
+
+benchmark: exact_koopman_toy
+seed: 0
+
+system:
+  mu: -0.05
+  lam: -1.0
+  x0: [1.0, 0.5]
+
+data:
+  t_span: [0.0, 100.0]
+  dt: 0.05
+  excitation: prbs
+
+hankel:
+  L: 10        # Hankel depth
+  n: 2         # assumed system order (raw state dim, for PE order L+n)
+
+perturbation_sweep:
+  epsilons: [0.0, 0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0]
+  # eps=0.0 is the Shang et al. exact-case anchor point (must be included)
+  perturbation_source: structured_noise  # or "undertrained_autoencoder" later
+
+output:
+  figure_path: paper/figures/theorem1_sanity_check.pdf

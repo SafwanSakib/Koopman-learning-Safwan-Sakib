@@ -53,23 +53,14 @@ def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: floa
     raise NotImplementedError("Week 1-2: implement PE input generation")
 
 
-def safe_set(x: np.ndarray, theta_max: float = 0.5, p_max: float = 2.4) -> dict:
-    """RESOLVED 2026-09-10 per the frozen Track A theory note
-    (notation_assumptions.tex: h(x) = e_j^T Phi(x) must be a SINGLE linear
-    coordinate). The angle bound and position bound are returned as TWO
-    SEPARATE barrier functions, NOT combined via min() -- each gets its own
-    embedded coordinate in models/autoencoder.py's h_coordinates list and
-    its own hard first-step CBF constraint (controllers/cbf_constraint.py).
-    Theorem 2 applies to each independently, giving
-    h_angle(x_k) >= -eta_1/gamma AND h_position(x_k) >= -eta_1/gamma
-    simultaneously -- the AND-of-bounds semantics a min() was trying to
-    express, without the non-embeddable nonlinearity.
+def safe_set(x: np.ndarray, theta_max: float = 0.5, p_max: float = 2.4) -> np.ndarray:
+    """h(x) = min(theta_max - |theta|, p_max - |p|) style combined bound.
 
-    Returns
-    -------
-    dict with keys "angle" and "position", each h(x) = bound - |value|
-    (>= 0 inside the safe region).
+    TODO (Week 2): decide whether to use a smooth (differentiable) surrogate
+    for the min() so h is nicer for the Koopman-embedding trick
+    (Theoretical_Background_Full.md §6.4) — a hard min complicates embedding
+    h as a single linear coordinate of z. A softmin or two separate CBFs
+    (one per bound) may be preferable; revisit once models/autoencoder.py's
+    h_coordinate contract is implemented.
     """
-    _, _, theta, _ = x
-    p = x[0]
-    return {"angle": theta_max - abs(theta), "position": p_max - abs(p)}
+    raise NotImplementedError("Week 2: finalize h(x) formulation, see docstring")

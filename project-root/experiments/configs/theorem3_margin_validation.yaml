@@ -1,0 +1,30 @@
+# Theorem 3 margin validation experiment config -- added 2026-09-10 per the
+# frozen Track A theory note (see experiments/theorem3_margin_validation.py
+# docstring for full rationale). Compares standard (coupled) vs. decoupled
+# data usage against Theorem 3's margin bound.
+
+benchmark: van_der_pol   # or cartpole, once its single-barrier variant is validated
+seed: 0
+
+data:
+  T_values: [200, 500, 1000, 2000, 4000, 8000]
+  # For the decoupled sweep, each T here is "T per half" (see module
+  # docstring) -- total data collected is comparable across both sweeps.
+  dt: 0.05
+  noise_sigma: 0.02
+  excitation: prbs
+
+deepc:
+  T_ini: 10
+  N_h: 15         # prediction horizon (renamed from N, see controllers/deepc.py)
+  lambda_g0: 1.0
+  lambda_sigma0: 1.0e4
+  gamma: 0.5
+  rho: 0.0        # margin-based (Theorem 2); set to eta_1 estimate for exact-invariance variant
+
+sweep:
+  num_seeds: 10
+  decouple_variants: [false, true]
+
+output:
+  figure_path: paper/figures/theorem3_margin_validation.pdf

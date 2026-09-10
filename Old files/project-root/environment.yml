@@ -29,16 +29,8 @@ dependencies:
 # - CasADi is a fallback QP/NLP path per Research Plan §8 if CVXPY+OSQP proves
 #   insufficiently flexible for nonlinear-constraint experiments (e.g. SOS baseline glue code).
 # - do-mpc is used only for Baseline #1 (model-based MPC, known dynamics).
-# - This file is pinned to the CUDA 12.1 build of PyTorch (torch==2.3.0+cu121),
-#   matching an RTX 3060 / recent NVIDIA driver on WSL2 or native Linux. If you
-#   are on a machine with no NVIDIA GPU, replace the two torch-related lines
-#   above with plain `torch==2.3.0` (CPU-only wheel, no --extra-index-url
-#   needed) — the codebase runs identically either way, just slower for
-#   autoencoder training (models/autoencoder.py, models/train.py).
-# - On Windows, install this inside WSL2 (Ubuntu), not native Windows —
-#   CasADi and do-mpc are meaningfully harder to install natively on Windows.
-#   WSL2 has automatic GPU passthrough for NVIDIA cards given a current
-#   Windows-side driver; verify with `nvidia-smi` inside WSL2 before creating
-#   this environment.
+# - GPU is optional (helps autoencoder training, Sections 2.1 / 4). CPU-only
+#   torch wheel is fine for the problem sizes in this project; swap the torch
+#   pip line for a CUDA build if you have a GPU available.
 # - Recreate with: conda env create -f environment.yml
 # - Update with:   conda env update -f environment.yml --prune

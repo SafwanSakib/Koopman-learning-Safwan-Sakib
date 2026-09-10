@@ -15,8 +15,8 @@ silently merge the two comparisons.
 TODO (Week 6-10):
     - This should NOT require new code beyond a config flag: set
       lambda_physics=0.0 in the models/losses.py total_koopman_loss call and
-      otherwise reuse the full pipeline (controllers/deepc.py +
-      controllers/cbf_constraint.py) unchanged.
+      otherwise reuse the full pipeline (control/deepc.py +
+      control/cbf_constraint.py) unchanged.
 """
 
 from __future__ import annotations
