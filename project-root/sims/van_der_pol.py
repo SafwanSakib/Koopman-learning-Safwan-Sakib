@@ -40,15 +40,33 @@ def simulate(x0: np.ndarray, u_fn, t_span: tuple[float, float], dt: float,
 
 
 def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: float,
-                            mu: float = 1.0, seed: int = 0, excitation: str = "prbs") -> dict:
+                            mu: float = 1.0, seed: int = 0, excitation: str = "prbs",
+                            hold_time: float = 0.5, amplitude: float = 1.0) -> dict:
     """Generate a trajectory under a persistently-exciting input scheme.
 
-    TODO (Week 1-2): implement PRBS / multisine / filtered-noise excitation
-    options (`excitation` selects the scheme), needed for the PE-order sweep
-    in Research Plan §7.2. Should return the same dict shape as `simulate`,
-    plus the realized input-excitation order for logging.
+    excitation="prbs": switches u randomly between -amplitude and +amplitude,
+    holding each value for `hold_time` seconds before the next random switch.
+    This is the standard, simplest PE input used throughout the DeePC
+    literature (Theoretical_Background_Full.md Sec.2.3).
     """
-    raise NotImplementedError("Week 1-2: implement PE input generation")
+    rng = np.random.default_rng(seed)
+    t_eval = np.arange(t_span[0], t_span[1], dt)
+
+    if excitation == "prbs":
+        switch_every = max(1, int(round(hold_time / dt)))
+        n_switches = len(t_eval) // switch_every + 2
+        levels = rng.choice([-amplitude, amplitude], size=n_switches)
+        u_vals = np.repeat(levels, switch_every)[: len(t_eval)]
+    else:
+        raise ValueError(f"Unknown excitation scheme: {excitation}")
+
+    def u_fn(t):
+        idx = min(int(round((t - t_span[0]) / dt)), len(u_vals) - 1)
+        return u_vals[idx]
+
+    result = simulate(x0, u_fn, t_span, dt, mu=mu)
+    result["u"] = u_vals  # overwrite with the exact PRBS array (avoids float-index rounding drift)
+    return result
 
 
 def safe_set(x: np.ndarray) -> np.ndarray:

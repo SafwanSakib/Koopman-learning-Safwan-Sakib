@@ -49,8 +49,29 @@ def simulate(x0: np.ndarray, u_fn, t_span: tuple[float, float], dt: float,
 
 
 def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: float,
-                            seed: int = 0, excitation: str = "prbs", **model_kwargs) -> dict:
-    raise NotImplementedError("Week 1-2: implement PE input generation")
+                            seed: int = 0, excitation: str = "prbs",
+                            hold_time: float = 0.3, amplitude: float = 2.0,
+                            m_c: float = 1.0, m_p: float = 0.1, l: float = 0.5) -> dict:
+    """Generate a trajectory under a PRBS input, same scheme as
+    sims/van_der_pol.py (see that module for the rationale)."""
+    rng = np.random.default_rng(seed)
+    t_eval = np.arange(t_span[0], t_span[1], dt)
+
+    if excitation == "prbs":
+        switch_every = max(1, int(round(hold_time / dt)))
+        n_switches = len(t_eval) // switch_every + 2
+        levels = rng.choice([-amplitude, amplitude], size=n_switches)
+        u_vals = np.repeat(levels, switch_every)[: len(t_eval)]
+    else:
+        raise ValueError(f"Unknown excitation scheme: {excitation}")
+
+    def u_fn(t):
+        idx = min(int(round((t - t_span[0]) / dt)), len(u_vals) - 1)
+        return u_vals[idx]
+
+    result = simulate(x0, u_fn, t_span, dt, m_c=m_c, m_p=m_p, l=l)
+    result["u"] = u_vals
+    return result
 
 
 def safe_set(x: np.ndarray, theta_max: float = 0.5, p_max: float = 2.4) -> dict:

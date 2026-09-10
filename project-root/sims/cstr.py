@@ -66,11 +66,64 @@ def simulate(x0: np.ndarray, u_fn, t_span: tuple[float, float], dt: float,
     u_vals = np.array([u_fn(t) for t in t_eval])
     return {"t": sol.t, "x": sol.y.T, "u": u_vals}
 
+def compute_steady_state(T_c: float, params: dict | None = None,
+                          T_bounds: tuple[float, float] = (280.0, 450.0)) -> np.ndarray:
+    """Find the steady-state (C_A, T) for a constant coolant temperature
+    T_c. Standard chemical-engineering technique (Seborg et al.): the
+    steady-state mass balance gives C_A directly as a function of T, so
+    substituting into the energy balance reduces the problem to a SINGLE
+    equation in T alone, solved by bisection (brentq) rather than a 2D
+    Newton solve -- far more robust for this system, which is known to
+    have multiple steady states (an S-shaped ignition/extinction curve)
+    in certain T_c ranges. brentq requires the residual to change sign
+    across T_bounds; if it doesn't (e.g. T_c lands exactly in the
+    multiplicity region where 3 roots exist within a narrower window),
+    narrow T_bounds to isolate the branch of interest.
+    """
+    from scipy.optimize import brentq
+
+    p = {**DEFAULTS, **(params or {})}
+
+    def energy_residual(T):
+        k = p["k0"] * np.exp(-p["E_over_R"] / T)
+        C_A = (p["q"] / p["V"]) * p["C_Af"] / (p["q"] / p["V"] + k)
+        return (
+            (p["q"] / p["V"]) * (p["Tf"] - T)
+            + (-p["dH"] / (p["rho"] * p["Cp"])) * k * C_A
+            + (p["UA"] / (p["V"] * p["rho"] * p["Cp"])) * (T_c - T)
+        )
+
+    T_ss = brentq(energy_residual, T_bounds[0], T_bounds[1])
+    k = p["k0"] * np.exp(-p["E_over_R"] / T_ss)
+    C_A_ss = (p["q"] / p["V"]) * p["C_Af"] / (p["q"] / p["V"] + k)
+    return np.array([C_A_ss, T_ss])
 
 def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: float,
-                            seed: int = 0, excitation: str = "prbs", **kwargs) -> dict:
-    raise NotImplementedError("Week 1-2: implement PE input generation")
+                            seed: int = 0, excitation: str = "prbs",
+                            hold_time: float = 1.0, u_nominal: float = 300.0,
+                            amplitude: float = 5.0, params: dict | None = None) -> dict:
+    """Generate a trajectory under a PRBS input PERTURBING a nominal coolant
+    temperature (not swinging between two extremes like the other
+    benchmarks) -- CSTR is sensitive to operating region, so excitation
+    stays local around u_nominal."""
+    rng = np.random.default_rng(seed)
+    t_eval = np.arange(t_span[0], t_span[1], dt)
 
+    if excitation == "prbs":
+        switch_every = max(1, int(round(hold_time / dt)))
+        n_switches = len(t_eval) // switch_every + 2
+        levels = u_nominal + rng.choice([-amplitude, amplitude], size=n_switches)
+        u_vals = np.repeat(levels, switch_every)[: len(t_eval)]
+    else:
+        raise ValueError(f"Unknown excitation scheme: {excitation}")
+
+    def u_fn(t):
+        idx = min(int(round((t - t_span[0]) / dt)), len(u_vals) - 1)
+        return u_vals[idx]
+
+    result = simulate(x0, u_fn, t_span, dt, params=params)
+    result["u"] = u_vals
+    return result
 
 def safe_set(x: np.ndarray, T_max: float = 400.0, C_A_min: float = 0.1) -> dict:
     """RESOLVED 2026-09-10 -- same resolution as sims/cartpole.py's

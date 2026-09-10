@@ -44,10 +44,32 @@ def simulate(x0: np.ndarray, t_span: tuple[float, float], dt: float, u_fn=None,
 
 
 def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: float,
-                            seed: int = 0, excitation: str = "prbs", **kwargs) -> dict:
-    raise NotImplementedError("Week 1-2: implement PE input generation (if a controlled "
-                              "variant is used; otherwise this benchmark may only need "
-                              "generate-and-predict, not closed-loop control)")
+                            seed: int = 0, excitation: str = "prbs",
+                            hold_time: float = 0.1, amplitude: float = 2.0,
+                            sigma: float = 10.0, rho: float = 28.0, beta: float = 8.0 / 3.0) -> dict:
+    """Generate a trajectory under a PRBS forcing term (via the optional
+    additive u in dynamics()). Lorenz is autonomous in its classical form
+    and used only as a prediction-accuracy stress test (Research Plan
+    Sec.7.1), not a control benchmark -- this exists mainly for interface
+    consistency with the other four simulators, and in case a controlled
+    variant is wanted later."""
+    rng = np.random.default_rng(seed)
+    t_eval = np.arange(t_span[0], t_span[1], dt)
 
+    if excitation == "prbs":
+        switch_every = max(1, int(round(hold_time / dt)))
+        n_switches = len(t_eval) // switch_every + 2
+        levels = rng.choice([-amplitude, amplitude], size=n_switches)
+        u_vals = np.repeat(levels, switch_every)[: len(t_eval)]
+    else:
+        raise ValueError(f"Unknown excitation scheme: {excitation}")
+
+    def u_fn(t):
+        idx = min(int(round((t - t_span[0]) / dt)), len(u_vals) - 1)
+        return u_vals[idx]
+
+    result = simulate(x0, t_span, dt, u_fn=u_fn, sigma=sigma, rho=rho, beta=beta)
+    result["u"] = u_vals
+    return result
 
 # Intentionally no safe_set() here — see module docstring.

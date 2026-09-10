@@ -48,9 +48,34 @@ def simulate(x0: np.ndarray, u_fn, t_span: tuple[float, float], dt: float,
 
 
 def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: float,
-                            seed: int = 0, excitation: str = "prbs", **kwargs) -> dict:
-    raise NotImplementedError("Week 1-2: implement PE input generation")
+                            seed: int = 0, excitation: str = "prbs",
+                            hold_time: float = 0.3, amplitude: float = 0.3,
+                            m: float = 1.0, I: float = 0.01, r: float = 0.25) -> dict:
+    """Generate a trajectory under a PRBS input PERTURBING each rotor
+    around its hover thrust (m*g/2 each) -- like sims/cstr.py, excitation
+    stays local around a physically sensible operating point rather than
+    swinging near zero, which would just make the vehicle fall."""
+    rng = np.random.default_rng(seed)
+    t_eval = np.arange(t_span[0], t_span[1], dt)
+    hover_thrust = m * G / 2
 
+    if excitation == "prbs":
+        switch_every = max(1, int(round(hold_time / dt)))
+        n_switches = len(t_eval) // switch_every + 2
+        levels_1 = hover_thrust + rng.choice([-amplitude, amplitude], size=n_switches)
+        levels_2 = hover_thrust + rng.choice([-amplitude, amplitude], size=n_switches)
+        u1_vals = np.repeat(levels_1, switch_every)[: len(t_eval)]
+        u2_vals = np.repeat(levels_2, switch_every)[: len(t_eval)]
+    else:
+        raise ValueError(f"Unknown excitation scheme: {excitation}")
+
+    def u_fn(t):
+        idx = min(int(round((t - t_span[0]) / dt)), len(u1_vals) - 1)
+        return np.array([u1_vals[idx], u2_vals[idx]])
+
+    result = simulate(x0, u_fn, t_span, dt, m=m, I=I, r=r)
+    result["u"] = np.stack([u1_vals, u2_vals], axis=1)
+    return result
 
 def safe_set(x: np.ndarray, obstacles: list[tuple[float, float, float]]) -> dict:
     """RESOLVED 2026-09-10 -- same resolution as sims/cartpole.py's
