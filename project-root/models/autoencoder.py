@@ -114,6 +114,8 @@ class KoopmanAutoencoder(nn.Module):
         hidden_dims: tuple[int, ...] = (64, 64),
         h_coordinates: list[int] | None = None,
         bilinear: bool = False,
+        state_mean: torch.Tensor | None = None,
+        state_std: torch.Tensor | None = None,
     ) -> None:
         super().__init__()
         self.state_dim = state_dim
@@ -121,6 +123,18 @@ class KoopmanAutoencoder(nn.Module):
         self.lift_dim = lift_dim
         self.h_coordinates = h_coordinates or []
         self.bilinear = bilinear
+        # State normalization (needed when different state dimensions live
+        # on very different physical scales, e.g. CSTR's C_A~1 vs T~300 --
+        # a raw MLP struggles badly with that scale mismatch. Defaults to
+        # no-op (mean=0, std=1) for benchmarks that don't need it, like
+        # Van der Pol and cart-pole, whose state dimensions are all
+        # roughly the same order of magnitude already.
+        if state_mean is None:
+            state_mean = torch.zeros(state_dim)
+        if state_std is None:
+            state_std = torch.ones(state_dim)
+        self.register_buffer("state_mean", state_mean)
+        self.register_buffer("state_std", state_std)
 
         # TODO: build encoder/decoder MLPs from hidden_dims.
         self.encoder = self._build_mlp(state_dim, lift_dim, hidden_dims)
@@ -134,10 +148,12 @@ class KoopmanAutoencoder(nn.Module):
             self.C = nn.Parameter(torch.zeros(input_dim, lift_dim, lift_dim))
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
-        return self.encoder(x)
+        x_norm = (x - self.state_mean) / self.state_std
+        return self.encoder(x_norm)
 
     def decode(self, z: torch.Tensor) -> torch.Tensor:
-        return self.decoder(z)
+        x_norm = self.decoder(z)
+        return x_norm * self.state_std + self.state_mean
 
     def lifted_step(self, z: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         """One-step lifted dynamics prediction z_{k+1} ~= A z_k + B u_k

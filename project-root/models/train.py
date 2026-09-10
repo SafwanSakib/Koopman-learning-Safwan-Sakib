@@ -58,6 +58,30 @@ def load_trajectory_data(benchmark: str, data_cfg: dict, seed: int) -> tuple[np.
             seed=seed,
             excitation=data_cfg["excitation"],
         )
+    elif benchmark == "cstr":
+        from scipy.optimize import brentq
+        from sims.cstr import DEFAULTS, generate_pe_trajectory
+
+        def _compute_steady_state(T_c, T_bounds=(280.0, 450.0)):
+            p = DEFAULTS
+            def energy_residual(T):
+                k = p["k0"] * np.exp(-p["E_over_R"] / T)
+                C_A = (p["q"] / p["V"]) * p["C_Af"] / (p["q"] / p["V"] + k)
+                return ((p["q"] / p["V"]) * (p["Tf"] - T)
+                        + (-p["dH"] / (p["rho"] * p["Cp"])) * k * C_A
+                        + (p["UA"] / (p["V"] * p["rho"] * p["Cp"])) * (T_c - T))
+            T_ss = brentq(energy_residual, T_bounds[0], T_bounds[1])
+            k = p["k0"] * np.exp(-p["E_over_R"] / T_ss)
+            C_A_ss = (p["q"] / p["V"]) * p["C_Af"] / (p["q"] / p["V"] + k)
+            return np.array([C_A_ss, T_ss])
+
+        x0 = _compute_steady_state(T_c=270.0)
+        T_samples = data_cfg["T"]
+        dt = data_cfg["dt"]
+        traj = generate_pe_trajectory(
+            x0=x0, t_span=(0.0, T_samples * dt), dt=dt, seed=seed,
+            excitation=data_cfg["excitation"],
+        )
     else:
         raise NotImplementedError(f"load_trajectory_data: benchmark '{benchmark}' not wired in yet")
 
@@ -102,6 +126,9 @@ def train(config_path: Path, seed: int) -> dict:
     val_ds = TensorDataset(x_t[split:], u_t[split:], x_next_t[split:])
     train_loader = DataLoader(train_ds, batch_size=train_cfg["batch_size"], shuffle=True)
 
+    state_mean = torch.tensor(x.mean(axis=0), dtype=torch.float32)
+    state_std = torch.tensor(x.std(axis=0) + 1e-6, dtype=torch.float32)  # +eps avoids divide-by-zero
+
     # --- Model ---
     model = KoopmanAutoencoder(
         state_dim=model_cfg["state_dim"],
@@ -110,6 +137,8 @@ def train(config_path: Path, seed: int) -> dict:
         hidden_dims=tuple(model_cfg["hidden_dims"]),
         h_coordinates=[],  # Van der Pol has no safe set yet, see sims/van_der_pol.py
         bilinear=model_cfg["bilinear"],
+        state_mean=state_mean,
+        state_std=state_std,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=train_cfg["lr"])
 

@@ -100,12 +100,19 @@ def compute_steady_state(T_c: float, params: dict | None = None,
 
 def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: float,
                             seed: int = 0, excitation: str = "prbs",
-                            hold_time: float = 1.0, u_nominal: float = 300.0,
+                            hold_time: float = 1.0, u_nominal: float = 270.0,
                             amplitude: float = 5.0, params: dict | None = None) -> dict:
-    """Generate a trajectory under a PRBS input PERTURBING a nominal coolant
-    temperature (not swinging between two extremes like the other
-    benchmarks) -- CSTR is sensitive to operating region, so excitation
-    stays local around u_nominal."""
+    """Generate a trajectory under a PRBS input perturbing coolant
+    temperature around u_nominal. u_nominal=270 (NOT 300) is a deliberate
+    choice: this model has three steady states near T_c~300 (a classic
+    exothermic-reactor ignition/extinction S-curve, see sims/cstr.py's
+    compute_steady_state docstring and Week 1-2's steady-state tests) --
+    PRBS switching near that fold region causes the reactor temperature to
+    run away numerically (confirmed: T_c=300 diverges to NaN via overflow
+    within ~20s of simulated time). T_c=270 sits on the model's
+    low-conversion branch, well away from the fold, and produces bounded,
+    well-behaved data.
+    """
     rng = np.random.default_rng(seed)
     t_eval = np.arange(t_span[0], t_span[1], dt)
 

@@ -104,9 +104,27 @@ def physics_loss_cartpole(x: torch.Tensor, u: torch.Tensor, z_next_pred: torch.T
     return torch.mean(torch.sum((z_nominal_next - z_next_pred) ** 2, dim=-1))
 
 
-def physics_loss_cstr(*args, **kwargs) -> torch.Tensor:
-    """Energy/mass-balance-consistency term for CSTR."""
-    raise NotImplementedError("Week 2-4")
+def physics_loss_cstr(x: torch.Tensor, u: torch.Tensor, z_next_pred: torch.Tensor,
+                       model, dt: float = 0.05) -> torch.Tensor:
+    """Mass/energy-balance-consistency term for CSTR. Mirrors
+    sims/cstr.py's dynamics() exactly, torch-differentiable version,
+    using the same DEFAULTS parameters."""
+    from sims.cstr import DEFAULTS
+
+    C_A, T = x[:, 0], x[:, 1]
+    T_c = u[:, 0]
+    p = DEFAULTS
+    k = p["k0"] * torch.exp(-p["E_over_R"] / T)
+    C_A_dot = (p["q"] / p["V"]) * (p["C_Af"] - C_A) - k * C_A
+    T_dot = (
+        (p["q"] / p["V"]) * (p["Tf"] - T)
+        + (-p["dH"] / (p["rho"] * p["Cp"])) * k * C_A
+        + (p["UA"] / (p["V"] * p["rho"] * p["Cp"])) * (T_c - T)
+    )
+    x_nominal_next = x + dt * torch.stack([C_A_dot, T_dot], dim=-1)
+
+    z_nominal_next = model.encode(x_nominal_next)
+    return torch.mean(torch.sum((z_nominal_next - z_next_pred) ** 2, dim=-1))
 
 
 def physics_loss_quadrotor(*args, **kwargs) -> torch.Tensor:
