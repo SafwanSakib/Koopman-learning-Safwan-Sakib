@@ -30,3 +30,11 @@ from models.losses import total_koopman_loss
 losses = total_koopman_loss(x, x_next, u, model, lambda_physics=1.0, benchmark="van_der_pol")
 for key, val in losses.items():
     print(f"{key}: {val.item()}")
+
+from models.autoencoder import KoopmanAutoencoder
+
+horizon = 10
+u_seq = torch.randn(batch_size, horizon, 1)
+x0_batch = torch.randn(batch_size, 2)
+rollout_traj = model.rollout(x0_batch, u_seq)
+print("rollout_traj:", rollout_traj.shape)  # expect (5, 11, 2)

@@ -178,6 +178,32 @@ class KoopmanAutoencoder(nn.Module):
             "x_next_hat": x_next_hat,
         }
 
+    def rollout(self, x0: torch.Tensor, u_sequence: torch.Tensor) -> torch.Tensor:
+        """Multi-step-ahead prediction: encode x0 once, then repeatedly
+        apply lifted_step (NEVER touching the true dynamics or re-encoding
+        intermediate ground truth), decoding back to x-space only at the
+        end of each step for output. This is what Track B Sec.2.1's
+        data-efficiency check needs -- a harder, more honest test than
+        one-step prediction_loss, since errors compound over the horizon.
+
+        Parameters
+        ----------
+        x0 : torch.Tensor, shape (batch, state_dim)
+        u_sequence : torch.Tensor, shape (batch, horizon, input_dim)
+
+        Returns
+        -------
+        torch.Tensor, shape (batch, horizon+1, state_dim) -- includes x0
+        as the first step.
+        """
+        z = self.encode(x0)
+        x_traj = [x0]
+        for t in range(u_sequence.shape[1]):
+            z = self.lifted_step(z, u_sequence[:, t, :])
+            x_traj.append(self.decode(z))
+        return torch.stack(x_traj, dim=1)
+
+
     def h_hat(self, z: torch.Tensor) -> torch.Tensor:
         """Extract ALL embedded barrier-function estimates from a lifted
         state, as a vector (one entry per self.h_coordinates). For the
