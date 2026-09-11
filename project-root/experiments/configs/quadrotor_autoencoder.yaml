@@ -11,7 +11,7 @@ data:
 model:
   state_dim: 6
   input_dim: 2
-  lift_dim: 3
+  lift_dim: 6
   hidden_dims: [32, 32]
   bilinear: false
 
