@@ -82,6 +82,19 @@ def load_trajectory_data(benchmark: str, data_cfg: dict, seed: int) -> tuple[np.
             x0=x0, t_span=(0.0, T_samples * dt), dt=dt, seed=seed,
             excitation=data_cfg["excitation"],
         )
+
+    elif benchmark == "quadrotor":
+        from sims.quadrotor import generate_pe_trajectory
+        T_samples = data_cfg["T"]
+        dt = data_cfg["dt"]
+        traj = generate_pe_trajectory(
+            x0=np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            t_span=(0.0, T_samples * dt),
+            dt=dt,
+            seed=seed,
+            excitation=data_cfg["excitation"],
+        )
+
     else:
         raise NotImplementedError(f"load_trajectory_data: benchmark '{benchmark}' not wired in yet")
 
@@ -92,7 +105,10 @@ def load_trajectory_data(benchmark: str, data_cfg: dict, seed: int) -> tuple[np.
 
     x_k = x[:-1]
     x_next = x[1:]
-    u_k = u[:-1].reshape(-1, 1)  # (T-1, 1) -- input_dim=1 for Van der Pol
+    u_k = u[:-1]
+    if u_k.ndim == 1:
+        u_k = u_k.reshape(-1, 1)  # single-input benchmarks (Van der Pol, cart-pole, CSTR)
+    # multi-input benchmarks (quadrotor: shape (T-1, 2)) are already correctly shaped
     return x_k, u_k, x_next
 
 def train(config_path: Path, seed: int) -> dict:

@@ -127,9 +127,24 @@ def physics_loss_cstr(x: torch.Tensor, u: torch.Tensor, z_next_pred: torch.Tenso
     return torch.mean(torch.sum((z_nominal_next - z_next_pred) ** 2, dim=-1))
 
 
-def physics_loss_quadrotor(*args, **kwargs) -> torch.Tensor:
-    """Rigid-body / momentum-consistency term for the quadrotor benchmark."""
-    raise NotImplementedError("Week 2-4")
+def physics_loss_quadrotor(x: torch.Tensor, u: torch.Tensor, z_next_pred: torch.Tensor,
+                            model, dt: float = 0.02, m: float = 1.0,
+                            I: float = 0.01, r: float = 0.25) -> torch.Tensor:
+    """Rigid-body / momentum-consistency term for the quadrotor benchmark.
+    Mirrors sims/quadrotor.py's dynamics() exactly, torch-differentiable
+    version."""
+    G_const = 9.81
+    _, _, phi, x_dot, z_dot, phi_dot = x[:, 0], x[:, 1], x[:, 2], x[:, 3], x[:, 4], x[:, 5]
+    u1, u2 = u[:, 0], u[:, 1]
+    x_ddot = -(u1 + u2) * torch.sin(phi) / m
+    z_ddot = (u1 + u2) * torch.cos(phi) / m - G_const
+    phi_ddot = (u2 - u1) * r / I
+
+    x_nominal_dot = torch.stack([x_dot, z_dot, phi_dot, x_ddot, z_ddot, phi_ddot], dim=-1)
+    x_nominal_next = x + dt * x_nominal_dot
+
+    z_nominal_next = model.encode(x_nominal_next)
+    return torch.mean(torch.sum((z_nominal_next - z_next_pred) ** 2, dim=-1))
 
 
 physics_loss_registry = {

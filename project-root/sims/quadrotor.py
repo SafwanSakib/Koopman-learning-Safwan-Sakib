@@ -50,11 +50,25 @@ def simulate(x0: np.ndarray, u_fn, t_span: tuple[float, float], dt: float,
 def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: float,
                             seed: int = 0, excitation: str = "prbs",
                             hold_time: float = 0.3, amplitude: float = 0.3,
+                            k_z: float = 2.0, k_zd: float = 1.0,
+                            k_x: float = 1.0, k_xd: float = 1.0,
+                            k_phi: float = 10.0, k_phid: float = 3.0,
                             m: float = 1.0, I: float = 0.01, r: float = 0.25) -> dict:
-    """Generate a trajectory under a PRBS input PERTURBING each rotor
-    around its hover thrust (m*g/2 each) -- like sims/cstr.py, excitation
-    stays local around a physically sensible operating point rather than
-    swinging near zero, which would just make the vehicle fall."""
+    """Generate a trajectory under PRBS rotor-thrust perturbations, PLUS a
+    cascaded stabilizing controller (altitude PD -> position-to-tilt outer
+    loop -> attitude PD -> differential thrust). Necessary because all
+    three of the quadrotor's position/attitude states (x, z, phi) have no
+    natural restoring force -- pure PRBS thrust perturbation with no
+    feedback causes the vehicle to fall out of the sky and tumble (x, z,
+    phi all diverge). This mirrors sims/cartpole.py's approach (mild
+    stabilizing feedback superimposed on genuine PRBS excitation) but
+    needs a proper cascade here since x is only actuated indirectly
+    through tilt (phi).
+
+    Sign note: x_ddot = -(u1+u2)*sin(phi)/m (see dynamics()), so
+    correcting x>0 requires phi>0 -- the outer loop's sign is
+    phi_des = +k_x*x + k_xd*x_dot, not the naive-looking negative.
+    """
     rng = np.random.default_rng(seed)
     t_eval = np.arange(t_span[0], t_span[1], dt)
     hover_thrust = m * G / 2
@@ -62,20 +76,30 @@ def generate_pe_trajectory(x0: np.ndarray, t_span: tuple[float, float], dt: floa
     if excitation == "prbs":
         switch_every = max(1, int(round(hold_time / dt)))
         n_switches = len(t_eval) // switch_every + 2
-        levels_1 = hover_thrust + rng.choice([-amplitude, amplitude], size=n_switches)
-        levels_2 = hover_thrust + rng.choice([-amplitude, amplitude], size=n_switches)
-        u1_vals = np.repeat(levels_1, switch_every)[: len(t_eval)]
-        u2_vals = np.repeat(levels_2, switch_every)[: len(t_eval)]
+        levels_1 = rng.choice([-amplitude, amplitude], size=n_switches)
+        levels_2 = rng.choice([-amplitude, amplitude], size=n_switches)
+        u1_prbs = np.repeat(levels_1, switch_every)[: len(t_eval)]
+        u2_prbs = np.repeat(levels_2, switch_every)[: len(t_eval)]
     else:
         raise ValueError(f"Unknown excitation scheme: {excitation}")
 
-    def u_fn(t):
-        idx = min(int(round((t - t_span[0]) / dt)), len(u1_vals) - 1)
-        return np.array([u1_vals[idx], u2_vals[idx]])
+    x = x0.copy()
+    xs = [x.copy()]
+    u_applied = []
+    for i in range(len(t_eval) - 1):
+        px, pz, phi, vx, vz, vphi = x
+        T_total = 2 * hover_thrust - k_z * pz - k_zd * vz
+        phi_des = np.clip(k_x * px + k_xd * vx, -0.3, 0.3)
+        diff = -k_phi * (phi - phi_des) - k_phid * vphi
+        u1 = (T_total - diff) / 2 + u1_prbs[i]
+        u2 = (T_total + diff) / 2 + u2_prbs[i]
+        u_applied.append([u1, u2])
+        x_dot = dynamics(t_eval[i], x, np.array([u1, u2]), m=m, I=I, r=r)
+        x = x + dt * x_dot
+        xs.append(x.copy())
+    u_applied.append(u_applied[-1])  # pad to match length
 
-    result = simulate(x0, u_fn, t_span, dt, m=m, I=I, r=r)
-    result["u"] = np.stack([u1_vals, u2_vals], axis=1)
-    return result
+    return {"t": t_eval, "x": np.array(xs), "u": np.array(u_applied)}
 
 def safe_set(x: np.ndarray, obstacles: list[tuple[float, float, float]]) -> dict:
     """RESOLVED 2026-09-10 -- same resolution as sims/cartpole.py's
